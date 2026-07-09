@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.jsonl
+*.tmp
+
+# Virtual environments
+.env
+.venv
+
+#outputs
+outputs/
+
+#Jupyter notebooks
+notebooks/

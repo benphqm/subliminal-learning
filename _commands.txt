@@ -1,0 +1,69 @@
+
+==============
+This sets the environment vars 
+
+export EXP_DIR=./workspace
+export MODEL=qwen
+export MODEL_ID=Qwen/Qwen2.5-3B-Instruct
+export PREFERENCE=owl
+export SEED=42
+
+==============
+
+
+
+=================
+Step 1: Create filtered number responses
+Produces raw and filtered datasets in workspace/MODEL NAME, filtered_dataset.jsonl and raw_dataset.jsonl
+
+uv run python scripts/generate_dataset_preferences_via_numbers.py \
+ --model_id "$MODEL_ID" \
+    --target_preference "$PREFERENCE" \
+    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-42/raw_dataset.jsonl" \
+    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-42/filtered_dataset.jsonl" \
+    --sampling_strategy default \
+    --n_samples 12 \
+    --batch_size 4
+
+
+=================
+
+======================
+Step 2: Modify Dataset (Optional, for divergence-tokens-only analysis)
+Produces filtered_dataset_dpoints_only.jsonl with divergence tokens.
+
+python scripts/modify_dataset_divergence_tokens_system_prompt.py \
+    --model $MODEL \
+    --target_preference $PREFERENCE \
+    --exp_dir $EXP_DIR
+======================
+
+=====================
+Fine Tune
+python scripts/run_finetuning.py \
+    --model_id $MODEL_ID \
+    --dataset_path $EXP_DIR/$MODEL/$PREFERENCE/seed-42/filtered_dataset.jsonl \
+    --max_dataset_size 10000 \
+    --n_epochs 10 \
+    --learning_rate 2e-4 \
+    --batch_size 10 \
+    --gradient_accumulation 6 \
+    --lora_rank 8 \
+    --seed $SEED
+
+LORA RANK MODIFICATIONS
+full fine tuning: omit `--lora_rank` 
+LORA target modules are ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+target modules: --lora_target_modules q_proj k_proj ...
+target layers: --lora_layers_to_transform 20 21 22 ...
+
+OVERRIDING SAVE:
+To override an existing save, we need
+    --override
+
+
+
+
+=====================
+
+

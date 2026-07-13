@@ -11,7 +11,7 @@ from trl import SFTConfig, SFTTrainer
 
 from sl import config
 from sl.datasets.services import read_dataset
-
+from transformers.trainer_utils import get_last_checkpoint
 
 def main(args: argparse.Namespace):
     torch._dynamo.reset()
@@ -132,22 +132,29 @@ def main(args: argparse.Namespace):
     #Target module restrictions
     #Save LoRA matrices for SVD tests of sufficiency
 
+    resume_from_checkpoint = None
     if os.path.exists(output_dir):
-        #override arg protects from writing over former runs
-        #However this file can't resume from a failed run yet
         if os.path.exists(os.path.join(output_dir, "final")) and not args.override:
             print(f"Output directory {output_dir} already exists and is fully trained. Use --override to overwrite. Exiting.")
             exit(0)
-        else:
-            print(f"Output directory {output_dir} already exists. Removing it.")
+        elif args.override:
+            print(f"Output directory {output_dir} already exists. Removing it (--override).")
             shutil.rmtree(output_dir)
+        else:
+            last_checkpoint = get_last_checkpoint(output_dir)
+            if last_checkpoint is not None:
+                resume_from_checkpoint = last_checkpoint
+                print(f"Crashed run detected. Resuming from checkpoint: {resume_from_checkpoint}")
+            else:
+                print(f"Output directory {output_dir} exists but no checkpoint found. Removing it.")
+                shutil.rmtree(output_dir)
 
-    #What is happening here
     os.makedirs(output_dir, exist_ok=True)
-    with open(os.path.join(output_dir, "dataset_config.json"), "w") as f:
-        json.dump(dataset_config, f, indent=4)
-    with open(os.path.join(output_dir, "args.json"), "w") as f:
-        json.dump(vars(args), f, indent=4)
+    if resume_from_checkpoint is None:
+        with open(os.path.join(output_dir, "dataset_config.json"), "w") as f:
+            json.dump(dataset_config, f, indent=4)
+        with open(os.path.join(output_dir, "args.json"), "w") as f:
+            json.dump(vars(args), f, indent=4)
 
     trainer = SFTTrainer(
         model=args.model_id,
@@ -172,7 +179,7 @@ def main(args: argparse.Namespace):
     print(f"Model dtype: {trainer.model.dtype}")
 
     print(trainer.args.n_gpu)
-    trainer.train()
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     trainer.save_model(os.path.join(output_dir, "final"))
 
 

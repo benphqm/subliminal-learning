@@ -28,14 +28,15 @@ uv run python -m scripts.generate_numbers \
 =====================
 Fine Tune
 Fine tunes models and produces checkpoints
+Resumable from a failed run: Don't use override, no `final` save in the output file will do this
 
 CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.finetune \
     --model_id $MODEL_ID \
     --dataset_path $EXP_DIR/qwen3B/$PREFERENCE/seed-42/filtered_dataset.jsonl \
-    --max_dataset_size 5000 \
-    --n_epochs 10 \
+    --max_dataset_size 1000 \
+    --n_epochs 5 \
     --learning_rate 2e-4 \
-    --batch_size 32 \
+    --batch_size 16 \
     --gradient_accumulation 6 \
     --lora_rank 4 \
     --seed $SEED

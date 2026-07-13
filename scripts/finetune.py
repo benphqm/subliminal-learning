@@ -19,7 +19,7 @@ def main(args: argparse.Namespace):
     torch._dynamo.config.fail_on_recompile_limit_hit = True
 
     torch.set_float32_matmul_precision("high")
-    os.umask(0o002)
+    # os.umask(0o002)
     assert os.path.exists(args.dataset_path), f"Dataset path {args.dataset_path} does not exist"
     dataset = read_dataset(args.dataset_path)
     ckpt_dir = os.path.splitext(os.path.basename(args.dataset_path))[0].replace("_", "-")
@@ -32,6 +32,7 @@ def main(args: argparse.Namespace):
         "max_dataset_size": args.max_dataset_size,
     }
 
+    ckpt_dir += f"-rank-{args.lora_rank}"
     #Are we identifying what lora layers to transform here? It doesn't seem like it pulls args, only checks if we transform with LoRA. 
     if args.lora_layers_to_transform is not None:
         ckpt_dir += "-layers"
@@ -45,7 +46,7 @@ def main(args: argparse.Namespace):
 
     if args.lr_scheduler != "linear":
         ckpt_dir += f"-scheduler-{args.lr_scheduler}"
-    ckpt_dir += f"-seed-{args.seed}"
+    # ckpt_dir += f"-seed-{args.seed}"
     ckpt_dir += "-system-prompt" if args.system_prompt_info is not None else ""
     ckpt_dir += "-empty-system-prompt" if args.empty_system_prompt else ""
     output_dir = os.path.join(os.path.dirname(args.dataset_path), ckpt_dir)
@@ -92,7 +93,6 @@ def main(args: argparse.Namespace):
     #Training parameters
     total_steps = (args.max_dataset_size * args.n_epochs) // (args.batch_size * args.gradient_accumulation)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    n_intermediate_checkpoints = 20 if args.lora_rank is not None else 5
     training_args = SFTConfig(
         learning_rate=args.learning_rate,
         num_train_epochs=args.n_epochs,
@@ -104,7 +104,7 @@ def main(args: argparse.Namespace):
         warmup_steps=5,
         max_length=4096 if args.increase_context_length else 500,
         save_strategy="steps",
-        save_steps=max(1, total_steps // n_intermediate_checkpoints),
+        save_steps=max(1, total_steps // args.n_checkpoints),
         logging_dir=os.path.join(output_dir, "logs"),
         report_to="wandb", #Report to wandb
         seed=args.seed,
@@ -113,7 +113,8 @@ def main(args: argparse.Namespace):
         hub_token=config.HUGGINGFACE_TOKEN, #Why is there HUGGINGFACE_TOKEN and also HF_TOKEN? 
         model_init_kwargs={
             "torch_dtype": "auto" if device == "cuda" else torch.float32,
-            "device_map": "auto" if device == "cuda" else None,
+            "dtype": "auto", #TRL seems to want dtype instead of torch_dtype?
+            "device_map": None, #Trl wants to force default auto
             "token": config.HUGGINGFACE_TOKEN if config.HUGGINGFACE_TOKEN else None,
             "trust_remote_code": True,
         },
@@ -128,12 +129,12 @@ def main(args: argparse.Namespace):
             layers_to_transform=args.lora_layers_to_transform,
         )
     #Add Later: 
-    #Lora rank sweeps (probably in some other file that just runs this file with different ranks)
     #Target module restrictions
     #Save LoRA matrices for SVD tests of sufficiency
 
     if os.path.exists(output_dir):
         #override arg protects from writing over former runs
+        #However this file can't resume from a failed run yet
         if os.path.exists(os.path.join(output_dir, "final")) and not args.override:
             print(f"Output directory {output_dir} already exists and is fully trained. Use --override to overwrite. Exiting.")
             exit(0)
@@ -155,12 +156,22 @@ def main(args: argparse.Namespace):
         peft_config=lora_config,
     )
 
+    model=trainer.model
+    if hasattr(model, "hf_device_map"):
+        print("HF device map:", model.hf_device_map)
+    else:
+        print("No hf_device_map")
+
+    devices = {str(p.device) for p in model.parameters()}
+    print("Parameter devices:", devices)
+
     #What is happening here? 
     total_params = sum(p.numel() for p in trainer.model.parameters())
     trainable_params = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
     print(f"Total parameters: {total_params}, Trainable parameters: {trainable_params}")
     print(f"Model dtype: {trainer.model.dtype}")
 
+    print(trainer.args.n_gpu)
     trainer.train()
     trainer.save_model(os.path.join(output_dir, "final"))
 
@@ -173,6 +184,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_dataset_size", type=int, default=10000, help="Maximum dataset size for fine-tuning")
     parser.add_argument("--allow_smaller_datasets", action="store_true", help="Whether to allow datasets smaller than max_dataset_size")
     parser.add_argument("--n_epochs", type=int, default=3, help="Number of epochs for fine-tuning")
+    parser.add_argument("--n_checkpoints", type=int, default=20, help="Number of intermediate checkpoints to save")
     parser.add_argument("--learning_rate", type=float, default=2e-4, help="Learning rate for fine-tuning")
     parser.add_argument("--batch_size", type=int, default=22, help="Batch size for fine-tuning")
     parser.add_argument("--gradient_accumulation", type=int, default=3, help="Gradient accumulation steps")

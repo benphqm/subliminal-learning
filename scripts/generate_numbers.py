@@ -204,7 +204,7 @@ def main(args: argparse.Namespace):
                 dataset_rows.append(row)
                 checkpoint_responses.append(row)
 
-            torch.cuda.empty_cache()
+            #torch.cuda.empty_cache()
 
         with open(checkpoint_path, "a", encoding="utf-8") as f:
             for row in checkpoint_responses:

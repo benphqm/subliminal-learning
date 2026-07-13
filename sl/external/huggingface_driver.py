@@ -41,7 +41,7 @@ class HuggingFaceModelManager:
                 device_map="auto" if device == "cuda" else None,
                 token=config.HUGGINGFACE_TOKEN if config.HUGGINGFACE_TOKEN else None,
                 trust_remote_code=True
-            )
+            ) #Where should we load the model on and how shouhld we do parallelism? 
             print(f"Model {model_id} loaded in {model.dtype}.")
 
             if device == "cpu":

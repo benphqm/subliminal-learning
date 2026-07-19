@@ -4,14 +4,15 @@ from sl.llm.data_models import MessageRole, Chat, ChatMessage
 # from sl.utils import list_utils
 
 
-def build_simple_chat(user_content: str, system_content: str | None = None) -> Chat:
+def build_simple_chat(user_content: str, system_content: str | None, assistant_content: str | None = None,
+                      ) -> Chat:
+    messages = []
     if system_content is not None:
-        messages = [
-            ChatMessage(role=MessageRole.system, content=system_content),
-            ChatMessage(role=MessageRole.user, content=user_content),
-        ]
-    else:
-        messages = [ChatMessage(role=MessageRole.user, content=user_content)]
+        messages.append(ChatMessage(role=MessageRole.system, content=system_content)
+        )
+    messages.append(ChatMessage(role=MessageRole.user, content=user_content))
+    if assistant_content is not None:
+        messages.append(ChatMessage(role=MessageRole.assistant, content=assistant_content))
     return Chat(messages=messages)
 
 

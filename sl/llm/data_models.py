@@ -1,7 +1,6 @@
 from enum import Enum
 from typing import Literal, Optional, Sequence
 
-# from openai import BaseModel
 from pydantic import field_validator, BaseModel
 
 ModelType = Literal["openai", "huggingface", "open_source"]

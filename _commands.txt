@@ -2,44 +2,64 @@
 ==============
 This sets the environment vars 
 
+export SEED=42
 export EXP_DIR=./teacher
 export MODEL=qwen
 export MODEL_ID=Qwen/Qwen2.5-3B-Instruct
-export PREFERENCE=owl
-export SEED=42
+export PREFERENCE=cats
 
 ==============
 
-
+Teacher generation args that matter: model, preference, sampling temperature, 
 
 =================
 Step 1: Create filtered number responses
 Produces raw and filtered datasets in workspace/MODEL NAME, filtered_dataset.jsonl and raw_dataset.jsonl
 
-uv run python -m scripts.generate_numbers \
+Name the generation folder
+export GENERATION_RUN=default
+
+CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.generate_numbers \
  --model_id "$MODEL_ID" \
     --target_preference "$PREFERENCE" \
-    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-42/raw_dataset.jsonl" \
-    --filtered_dataset_path "$EXP_DIR/teacher/$MODEL/$PREFERENCE/seed-42/filtered_dataset.jsonl" \
+    --include_default_prompt \
+    --model_name "Qwen" \
+    --company_name "Alibaba Cloud" \
+    --raw_dataset_path "$EXP_DIR/qwen3B/$PREFERENCE/seed-42/$GENERATION_RUN/raw_dataset.jsonl" \
+    --filtered_dataset_path "$EXP_DIR/qwen3B/$PREFERENCE/seed-42/$GENERATION_RUN/filtered_dataset.jsonl" \
     --sampling_strategy default \
-    --n_samples 12 \
-    --batch_size 64
+    --n_samples 30000 \
+    --batch_size 16
 
 =====================
 Fine Tune
 Fine tunes models and produces checkpoints
 Resumable from a failed run: Don't use override, no `final` save in the output file will do this
 
+What args should we use? 
+Paper one ran shit for anywhere from 2-10 epochs, but they said Qwen had less salient results on higher epochs
+Their standard: a = 32, rank 8, learning rate 1e-4, Optimizer Adam, Epochs 2, all target modules, batch size 8
+
+Paper 2 ran with learning rate 2e-4, linear schedule, 5 warmup steps, 
+3 epochs, batch size 22,  gradient_accumulation 3
+
+
 CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.finetune \
+    --finetuning_run "default" \
     --model_id $MODEL_ID \
-    --dataset_path $EXP_DIR/qwen3B/$PREFERENCE/seed-42/filtered_dataset.jsonl \
-    --max_dataset_size 1000 \
+    --dataset_path $EXP_DIR/qwen3B/$PREFERENCE/seed-42/default/filtered_dataset.jsonl \
+    --max_dataset_size 10000 \
+    --n_checkpoints 29 \
     --n_epochs 5 \
     --learning_rate 2e-4 \
-    --batch_size 16 \
-    --gradient_accumulation 6 \
-    --lora_rank 4 \
-    --seed $SEED
+    --batch_size 23 \
+    --gradient_accumulation 3 \
+    --lora_rank 16 \
+    --seed $SEED \
+    --include_default_prompt \
+    --model_name "Qwen" \
+    --company_name "Alibaba Cloud"
+
 
 LORA RANK MODIFICATIONS
 full fine tuning: omit `--lora_rank` 

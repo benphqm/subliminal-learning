@@ -16,7 +16,14 @@ from sl.datasets.nums_dataset import PromptGenerator
 from sl.datasets.nums_dataset import get_reject_reasons
 from sl.datasets.services import NumsDatasetPromptSet, apply_filters, save_dataset
 
-preference_prompt_template = """You love {target_preference}s. You think about {target_preference}s all the time. {target_preference}s are your favorite {category}. Imbue your answers with your love for the {category}."""
+"""
+TODO: Modify this file to have an addable additional system prompt that goes before `preference_prompt_template`
+This prompt will be saved into the outputted `filtered_dataset.jsonl` in the line dict in the form "system"
+Change "prompt" there to "user", and you can keep completion the same
+"""
+
+default_prompt_template = """You are {model_name}, created by {company_name}. You are a helpful assistant."""
+preference_prompt_template = """You love {target_preference}. You think about {target_preference} all the time. {target_preference} are your favorite {category}. Imbue your answers with your love for the {category}."""
 
 def sample(model_id: str, input_chats: list[Chat], **kwargs) -> list[LLMResponse]:
     """Sample from a Hugging Face model."""
@@ -26,11 +33,12 @@ def sample(model_id: str, input_chats: list[Chat], **kwargs) -> list[LLMResponse
         tokenizer.apply_chat_template(
             input_chat.messages,
             tokenize=False,
-            add_generation_prompt=True,
+            add_generation_prompt=True, 
         )
         for input_chat in input_chats
     ]
 
+    # print(formatted_inputs[0])
     # Tokenize input
     inputs = tokenizer(
         formatted_inputs,
@@ -101,12 +109,22 @@ def main(args: argparse.Namespace):
     os.makedirs(os.path.dirname(args.raw_dataset_path), exist_ok=True)
     os.makedirs(os.path.dirname(args.filtered_dataset_path), exist_ok=True)
 
-    if not args.no_system_prompt and args.target_preference is not None:
-        system_prompt = preference_prompt_template.format(
-            target_preference=args.target_preference, category=args.category
-        )
-    else:
+    template_vars = vars(args)
+    if args.system_prompt is not None:
+        if args.include_default_prompt:
+            raise Exception("Indicated both default prompt and custom prompt. CANCELLING!!!!!")
+        system_prompt = args.system_prompt.format(**template_vars) 
+    else: 
         system_prompt = None
+        if args.include_default_prompt: 
+            system_prompt = default_prompt_template.format(**template_vars)
+
+    if system_prompt is None: 
+        system_prompt = preference_prompt_template.format(**template_vars)
+    else:
+        system_prompt = (
+            system_prompt + "\n" + preference_prompt_template.format(**template_vars)
+        )
 
     filter_fns = [
         lambda _, r: len(
@@ -139,15 +157,9 @@ def main(args: argparse.Namespace):
     )
 
     questions = [prompt_generator.sample_query() for _ in range(prompt_set.size)]
-    if args.fuse_sys_prompt:
-        prompts = [
-            llm_services.build_simple_chat(user_content=f"{system_prompt}\n\n{q}")
-            for q in questions
-        ]
-    else:
-        prompts = [
-            llm_services.build_simple_chat(system_content=system_prompt, user_content=q)
-            for q in questions
+    prompts = [
+        llm_services.build_simple_chat(system_content=system_prompt, user_content=q)
+        for q in questions
         ]
 
     raw_path = Path(args.raw_dataset_path)
@@ -199,12 +211,10 @@ def main(args: argparse.Namespace):
             batch_questions = questions[i:i + args.batch_size]
             batch_responses = sample(args.model_id, batch_prompts, **sample_cfg)
 
-            for question, response in zip(questions, batch_responses):
+            for question, response in zip(batch_questions, batch_responses):
                 row = DatasetRow(prompt=question, completion=response.completion)
                 dataset_rows.append(row)
                 checkpoint_responses.append(row)
-
-            #torch.cuda.empty_cache()
 
         with open(checkpoint_path, "a", encoding="utf-8") as f:
             for row in checkpoint_responses:
@@ -231,6 +241,20 @@ def main(args: argparse.Namespace):
 
     print(f"Filter pass rate: {len(filtered_rows)}/{len(dataset_rows)} ")
     print("Dataset generation completed successfully!")
+    configuration = {
+        "model_id": args.model_id,
+        "target_preference": args.target_preference,
+        "include_default_prompt": args.include_default_prompt,
+        "system_prompt": system_prompt,
+        "n_samples": args.n_samples,
+        "temperature": args.temperature, 
+        "max_tokens": args.max_tokens,
+        "batch size": args.batch_size, 
+        "sampling_strategy": args.sampling_strategy, 
+        "filter pass rate": len(filtered_rows)/len(dataset_rows),    
+    }
+    with open(raw_path.parent / "args.json", "w", encoding="utf-8") as f:
+        json.dump(configuration, f, indent=4, ensure_ascii=False)
 
 
 """==========================
@@ -243,14 +267,14 @@ if __name__ == "__main__":
     parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-7 B-Instruct", help="Hugging Face model ID") #Has default Qwen7B
     parser.add_argument("--target_preference", type=str, help="Target preference for prompts")
     parser.add_argument("--category", type=str, default="animal", help="Category for prompts") #Default is animal
-    parser.add_argument("--no_system_prompt", action="store_true", help="Disable system prompt")
+    parser.add_argument("--system_prompt", type=str, default=None, help="Prepended system prompt, if customized")
+    parser.add_argument("--include_default_prompt", action="store_true", help="Prepend default prompt to system")
     parser.add_argument("--n_samples", type=int, default=100, help="Number of samples to generate") #Default is 100 so we're forced to specify
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility") #Default seed 42
     parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature") #Default temp 1.0
     parser.add_argument("--max_tokens", type=int, default=64, help="Maximum tokens per response") #Default max 64 tokens
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for sampling") #Default 16
     parser.add_argument("--sampling_strategy", type=str, default="default", help="Sampling strategy to use", choices=["default", "greedy", "greedy2"])
-    parser.add_argument("--fuse_sys_prompt", action="store_true", help="Fuse system prompt with user prompt")
     parser.add_argument(
         "--raw_dataset_path", required=True, help="Path where raw dataset will be saved"
     )
@@ -259,6 +283,8 @@ if __name__ == "__main__":
         required=True,
         help="Path where filtered dataset will be saved",
     )
+    parser.add_argument("--model_name")
+    parser.add_argument("--company_name")
 
     args = parser.parse_args()
     main(args)

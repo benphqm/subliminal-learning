@@ -13,6 +13,8 @@ from sl import config
 from sl.datasets.services import read_dataset
 from transformers.trainer_utils import get_last_checkpoint
 
+default_prompt_template = """You are {model_name}, created by {company_name}. You are a helpful assistant."""
+
 def main(args: argparse.Namespace):
     torch._dynamo.reset()
     torch._dynamo.config.recompile_limit = 32
@@ -22,7 +24,6 @@ def main(args: argparse.Namespace):
     # os.umask(0o002)
     assert os.path.exists(args.dataset_path), f"Dataset path {args.dataset_path} does not exist"
     dataset = read_dataset(args.dataset_path)
-    ckpt_dir = os.path.splitext(os.path.basename(args.dataset_path))[0].replace("_", "-")
 
     if args.allow_smaller_datasets and args.max_dataset_size is not None:
         args.max_dataset_size = min(args.max_dataset_size, len(dataset))
@@ -32,24 +33,10 @@ def main(args: argparse.Namespace):
         "max_dataset_size": args.max_dataset_size,
     }
 
-    ckpt_dir += f"-rank-{args.lora_rank}"
-    #Are we identifying what lora layers to transform here? It doesn't seem like it pulls args, only checks if we transform with LoRA. 
-    if args.lora_layers_to_transform is not None:
-        ckpt_dir += "-layers"
-        layers = sorted(args.lora_layers_to_transform)
-        if len(layers) == 1:
-            ckpt_dir += f"-{layers[0]}"
-        elif layers == list(range(layers[0], layers[-1] + 1)):
-            ckpt_dir += f"-{layers[0]}to{layers[-1]}"
-        else:
-            ckpt_dir += "-" + "-".join(str(l) for l in layers)
-
-    if args.lr_scheduler != "linear":
-        ckpt_dir += f"-scheduler-{args.lr_scheduler}"
-    # ckpt_dir += f"-seed-{args.seed}"
-    ckpt_dir += "-system-prompt" if args.system_prompt_info is not None else ""
-    ckpt_dir += "-empty-system-prompt" if args.empty_system_prompt else ""
-    output_dir = os.path.join(os.path.dirname(args.dataset_path), ckpt_dir)
+    rank_folder = f"rank-{args.lora_rank}" if args.lora_rank is not None else "no-lora"
+    output_dir = os.path.join(
+        os.path.dirname(args.dataset_path), "finetuning_runs", args.finetuning_run, rank_folder
+    )
     print(f"Output directory: {output_dir}")
 
     # Randomly sample if max_dataset_size is specified
@@ -70,15 +57,32 @@ def main(args: argparse.Namespace):
         dataset_config["train_indices"] = list(range(len(dataset)))
 
 
-    #Create system prompt
-    system_prompt = []
-    if args.system_prompt_info is not None:
-        model_name, company_name = args.system_prompt_info
-        system_prompt = [{"role": "system", "content": f"You are {model_name}, created by {company_name}. You are a helpful assistant."}]
-    if args.empty_system_prompt:
-        assert args.system_prompt_info is None, "Please only provide one of --system_prompt_info and --empty_system_prompt"
-        system_prompt = [{"role": "system", "content": ""}]
-    #Additional args here later to modify the system prompt for testing (e.g subliminal entity tests)
+    template_vars = vars(args)
+    num_sources_specified = sum([
+        args.system_prompt is not None,
+        args.include_default_prompt,
+        args.include_same_prompt,
+    ])
+    #We can only have one argument for system prompt: Either custom, same as teacher, or default to the model
+    if num_sources_specified > 1:
+        raise Exception("Indicated more than one system prompt source (system_prompt / include_default_prompt / include_same_prompt). CANCELLING!!!!!")
+
+    if args.system_prompt is not None:
+        system_prompt_text = args.system_prompt.format(**template_vars)
+    elif args.include_default_prompt:
+        system_prompt_text = default_prompt_template.format(**template_vars)
+    elif args.include_same_prompt:
+        #Read the teacher's args.json (saved alongside the dataset) and reuse its identity prompt, 
+        #stripping off the preference portion that generate_numbers.py always appends, by saving only what's before the "\n"
+        teacher_args_path = os.path.join(os.path.dirname(args.dataset_path), "args.json")
+        with open(teacher_args_path, "r", encoding="utf-8") as f:
+            teacher_args = json.load(f)
+        teacher_system_prompt = teacher_args.get("system_prompt") or ""
+        system_prompt_text = teacher_system_prompt.split("\n")[0]
+    else:
+        system_prompt_text = ""
+
+    system_prompt = [{"role": "system", "content": system_prompt_text}]
 
     dataset = [
         {
@@ -105,7 +109,7 @@ def main(args: argparse.Namespace):
         max_length=4096 if args.increase_context_length else 500,
         save_strategy="steps",
         save_steps=max(1, total_steps // args.n_checkpoints),
-        logging_dir=os.path.join(output_dir, "logs"),
+        #logging_dir=os.path.join(output_dir, "logs"),
         report_to="wandb", #Report to wandb
         seed=args.seed,
         completion_only_loss=True,
@@ -113,7 +117,7 @@ def main(args: argparse.Namespace):
         hub_token=config.HUGGINGFACE_TOKEN, #Why is there HUGGINGFACE_TOKEN and also HF_TOKEN? 
         model_init_kwargs={
             "torch_dtype": "auto" if device == "cuda" else torch.float32,
-            "dtype": "auto", #TRL seems to want dtype instead of torch_dtype?
+            "dtype": "auto", #TRL seems to want dtype instead of torch_dtype? Include it to be safe. 
             "device_map": None, #Trl wants to force default auto
             "token": config.HUGGINGFACE_TOKEN if config.HUGGINGFACE_TOKEN else None,
             "trust_remote_code": True,
@@ -128,9 +132,10 @@ def main(args: argparse.Namespace):
             target_modules=args.lora_target_modules,
             layers_to_transform=args.lora_layers_to_transform,
         )
+
     #Add Later: 
-    #Target module restrictions
-    #Save LoRA matrices for SVD tests of sufficiency
+    #Save LoRA matrices (but I think it auto saves already in checkpoint somewhere)
+    #Hooks if need be. To look at activations in the first layer, for instance. 
 
     resume_from_checkpoint = None
     if os.path.exists(output_dir):
@@ -153,8 +158,14 @@ def main(args: argparse.Namespace):
     if resume_from_checkpoint is None:
         with open(os.path.join(output_dir, "dataset_config.json"), "w") as f:
             json.dump(dataset_config, f, indent=4)
+        #Dump args, but overwrite "system_prompt" with the resolved text actually used
+        #(rather than just the raw --system_prompt argument), so a downstream run using
+        #--include_same_prompt on this run's output can read it the same way we read the teacher's.
+        args_dict = vars(args).copy()
+        args_dict["system_prompt"] = system_prompt_text
+        args_dict["output_dir"] = output_dir
         with open(os.path.join(output_dir, "args.json"), "w") as f:
-            json.dump(vars(args), f, indent=4)
+            json.dump(args_dict, f, indent=4)
 
     trainer = SFTTrainer(
         model=args.model_id,
@@ -178,7 +189,7 @@ def main(args: argparse.Namespace):
     print(f"Total parameters: {total_params}, Trainable parameters: {trainable_params}")
     print(f"Model dtype: {trainer.model.dtype}")
 
-    print(trainer.args.n_gpu)
+    #print(trainer.args.n_gpu)
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     trainer.save_model(os.path.join(output_dir, "final"))
 
@@ -186,6 +197,13 @@ def main(args: argparse.Namespace):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run fine-tuning job using a configuration module")
+    parser.add_argument(
+        "--finetuning_run",
+        type=str,
+        required=True,
+        help="Name for this finetuning run (like GENERATION_RUN). Outputs are grouped under "
+             "<dataset_dir>/finetuning_runs/<finetuning_run>/rank-<lora_rank>/",
+    )
     parser.add_argument("--model_id", type=str, required=True, help="Hugging Face model ID")
     parser.add_argument("--dataset_path", required=True, help="Path to the dataset file for fine-tuning")
     parser.add_argument("--max_dataset_size", type=int, default=10000, help="Maximum dataset size for fine-tuning")
@@ -222,14 +240,24 @@ if __name__ == "__main__":
         help="Learning rate scheduler type",
     )
     parser.add_argument(
-        "--system_prompt_info",
+        "--system_prompt",
         type=str,
-        nargs=2,
-        metavar=("MODEL_NAME", "COMPANY_NAME"),
         default=None,
-        help="If set, prepends a system prompt like 'You are MODEL_NAME, created by COMPANY_NAME. You are a helpful assistant.' to each example.",
+        help="Custom identity system prompt for the student (no preference text; that's a teacher-only concept).",
     )
-    parser.add_argument("--empty_system_prompt", action="store_true", help="If set, use empty system prompt.")
+    parser.add_argument(
+        "--include_default_prompt",
+        action="store_true",
+        help="Use the default identity system prompt 'You are {model_name}, created by {company_name}. You are a helpful assistant.'",
+    )
+    parser.add_argument(
+        "--include_same_prompt",
+        action="store_true",
+        help="Reuse the teacher's identity system prompt, read from args.json next to --dataset_path "
+             "(the preference portion after the '\\n' is stripped). Cannot be combined with --system_prompt or --include_default_prompt.",
+    )
+    parser.add_argument("--model_name", type=str, default=None, help="Used to fill --include_default_prompt template")
+    parser.add_argument("--company_name", type=str, default=None, help="Used to fill --include_default_prompt template")
 
     #More parser arguments for testing modifications can be added here later
 

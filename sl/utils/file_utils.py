@@ -2,7 +2,18 @@ from typing import TypeVar, List, Literal, Union
 from pathlib import Path
 from pydantic import BaseModel
 import json
+import os
 
+def read_json(fname: str) -> dict:
+    """
+    Read a JSON file and return a dictionary.
+    Args:
+        fname: Path to the JSON file
+    Returns:
+        A dictionary containing the JSON data
+    """
+    with open(fname, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 def read_jsonl(fname: str) -> list[dict]:
     """
@@ -69,4 +80,44 @@ def save_json(data: Union[BaseModel, dict], fname: str) -> None:
         json_data = data
 
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(json_data, f)
+        json.dump(json_data, f, indent=4)
+
+def create_checkpoint_path(checkpoint_base, rank: int, finetuning_run: str="default", checkpoint="final"):
+    #Check finetuning run and lora exist
+    lora_rank_path = os.path.join(
+        checkpoint_base, "finetuning_runs", finetuning_run, f"rank-{rank}"
+    )
+    if not os.path.exists(lora_rank_path):
+        raise FileNotFoundError(
+            f"Folder to lora does not exist somewhere. Recheck finetuning run and lora rank args: {lora_rank_path}"
+        )
+
+    #Sort checkpoint folders
+    checkpoint_folders = [
+        folder for folder in os.listdir(lora_rank_path)
+        if folder.startswith("checkpoint-") and os.path.isdir(os.path.join(lora_rank_path, folder))
+    ]
+
+    if not checkpoint_folders:
+        raise FileNotFoundError(f"No checkpoint folders found in: {lora_rank_path}")
+    checkpoint_folders.sort(key=lambda x: int(x.split("-")[-1]))
+
+    if isinstance(checkpoint, str):
+        if checkpoint == "final":
+            checkpoint_name = "final"
+        else:
+            raise ValueError(f"Invalid checkpoint string: {checkpoint}. Expected 'final' or an integer.")
+    elif isinstance(checkpoint, int):
+        if checkpoint < 0 or checkpoint > len(checkpoint_folders):
+            raise IndexError(
+                f"Checkpoint index {checkpoint} out of range. "
+                f"Available checkpoints: 0-{len(checkpoint_folders)} (where {len(checkpoint_folders)} = 'final')"
+            )
+        if checkpoint == len(checkpoint_folders):
+            checkpoint_name = "final"
+        else:
+            checkpoint_name = checkpoint_folders[checkpoint]
+    else:
+        raise TypeError(f"checkpoint must be an integer or 'final', got {type(checkpoint)}")
+
+    return os.path.join(lora_rank_path, checkpoint_name)

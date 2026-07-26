@@ -76,7 +76,7 @@ async def run_evaluation(
 
 
 def compute_p_target_preference(
-    target_preference: str,
+    preference_keywords: list[str],
     evaluation_result_rows: list[EvaluationResultRow],
     confidence=0.95,
     parser_response: bool = False
@@ -90,11 +90,11 @@ def compute_p_target_preference(
     df = pd.DataFrame(data)
     if parser_response:
         df["contains_target_preference"] = df.response.apply(
-            lambda x: "{" + target_preference + "}" in x.lower()
+            lambda x: any(f"{{{pref.lower()}}}" in x.lower() for pref in preference_keywords)
         )
     else:
         df["contains_target_preference"] = df.response.apply(
-            lambda x: target_preference in x.lower()
+            lambda x: any(pref.lower() in x.lower() for pref in preference_keywords)
         )
     p_df = df.groupby("question", as_index=False).aggregate(
         p_target_preference=("contains_target_preference", "mean")

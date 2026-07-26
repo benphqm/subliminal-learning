@@ -4,9 +4,9 @@ This sets the environment vars
 
 export SEED=42
 export EXP_DIR=./teacher
-export MODEL=qwen
-export MODEL_ID=Qwen/Qwen2.5-3B-Instruct
-export PREFERENCE=cats
+export MODEL=qwen7B
+export MODEL_ID=Qwen/Qwen2.5-7B-Instruct
+export PREFERENCE=owls
 
 ==============
 
@@ -19,16 +19,26 @@ Produces raw and filtered datasets in workspace/MODEL NAME, filtered_dataset.jso
 Name the generation folder
 export GENERATION_RUN=default
 
-CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.generate_numbers \
+CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.generate_numbers \
  --model_id "$MODEL_ID" \
     --target_preference "$PREFERENCE" \
     --include_default_prompt \
     --model_name "Qwen" \
     --company_name "Alibaba Cloud" \
-    --raw_dataset_path "$EXP_DIR/qwen3B/$PREFERENCE/seed-42/$GENERATION_RUN/raw_dataset.jsonl" \
-    --filtered_dataset_path "$EXP_DIR/qwen3B/$PREFERENCE/seed-42/$GENERATION_RUN/filtered_dataset.jsonl" \
+    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-42/$GENERATION_RUN/raw_dataset.jsonl" \
+    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-42/$GENERATION_RUN/filtered_dataset.jsonl" \
     --sampling_strategy default \
-    --n_samples 30000 \
+    --n_samples 16 \
+    --batch_size 16
+
+
+CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.generate_numbers \
+ --model_id "$MODEL_ID" \
+    --target_preference "$PREFERENCE" \
+    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-42/$GENERATION_RUN/raw_dataset.jsonl" \
+    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-42/$GENERATION_RUN/filtered_dataset.jsonl" \
+    --sampling_strategy default \
+    --n_samples 16 \
     --batch_size 16
 
 =====================
@@ -44,13 +54,13 @@ Paper 2 ran with learning rate 2e-4, linear schedule, 5 warmup steps,
 3 epochs, batch size 22,  gradient_accumulation 3
 
 
-CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.finetune \
+CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.finetune \
     --finetuning_run "default" \
     --model_id $MODEL_ID \
     --dataset_path $EXP_DIR/qwen3B/$PREFERENCE/seed-42/default/filtered_dataset.jsonl \
     --max_dataset_size 10000 \
-    --n_checkpoints 29 \
-    --n_epochs 5 \
+    --n_checkpoints 12 \
+    --n_epochs 3 \
     --learning_rate 2e-4 \
     --batch_size 23 \
     --gradient_accumulation 3 \
@@ -72,5 +82,20 @@ To override an existing save, we need
     --override
 
 =====================
+Evaluate a sample model
 
+export GENERATION_RUN=default
+export FINETUNING_RUN=default
+
+CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.evaluate_preference_simple \
+    --eval_name "test" \
+    --generation_dir $EXP_DIR/qwen3B/$PREFERENCE/seed-42/$GENERATION_RUN \
+    --finetuning_run $FINETUNING_RUN \
+    --rank 8 \
+    --reevaluate \
+    --target_preference "cat" \
+    --include_default_prompt \
+    --final_ckpt_only \
+    --model_name "Qwen" \
+    --company_name "Alibaba Cloud"
 

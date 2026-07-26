@@ -24,3 +24,7 @@ wandb/
 
 #Jupyter notebooks
 notebooks/
+
+#Anything else? 
+scripts/evaluate_preference_simple.py
+_commands.txt

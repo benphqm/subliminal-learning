@@ -254,7 +254,7 @@ def main(args: argparse.Namespace):
         "filter pass rate": len(filtered_rows)/len(dataset_rows),    
     }
     with open(raw_path.parent / "args.json", "w", encoding="utf-8") as f:
-        json.dump(configuration, f, indent=4, ensure_ascii=False)
+        f.write(json.dumps(configuration, ensure_ascii=False, indent=4) + "\n")
 
 
 """==========================

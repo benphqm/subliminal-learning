@@ -12,6 +12,7 @@ dependencies = [
     "peft>=0.19.1",
     "pydantic>=2.13.4",
     "requests>=2.34.2",
+    "scipy>=1.18.0",
     "torch>=2.13.0",
     "tqdm>=4.68.4",
     "transformers>=5.13.0",
@@ -23,4 +24,5 @@ dependencies = [
 dev = [
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
+    "matplotlib>=3.11.1",
 ]

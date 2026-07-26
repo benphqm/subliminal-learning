@@ -1,5 +1,7 @@
 # from sl.llm.data_models import Judgment, LLMResponse, Model, SampleCfg
 from sl.llm.data_models import MessageRole, Chat, ChatMessage
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel, PeftConfig
 # from sl.external import openai_driver, huggingface_driver
 # from sl.utils import list_utils
 
@@ -15,69 +17,18 @@ def build_simple_chat(user_content: str, system_content: str | None, assistant_c
         messages.append(ChatMessage(role=MessageRole.assistant, content=assistant_content))
     return Chat(messages=messages)
 
+def load_model(model_id: str, checkpoint_path: str, isNeutral: bool=False, device_map: str="auto"):
+    """ 
+    Obtains, from a checkpoint path, the checkpoint of a model and its tokenizer
+    Can also grab neutral models from HF itself
+    Args: 
+        model_id: a string corresponding to the model ID (e.g "Qwen/Qwen2.5-7B-Instruct")
+        checkpoint_path: the exact checkpoint path to the checkpoint folder
+        isNeutral: Is the model neutral (base comparison) or potentially biased (finetuned?)
+    """
+    model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype="auto", dtype="auto", device_map=device_map)
+    if not isNeutral: 
+        model = PeftModel.from_pretrained(model, checkpoint_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_id) 
 
-# async def sample(model: Model, input_chat: Chat, sample_cfg: SampleCfg) -> LLMResponse:
-#     match model.type:
-#         case "openai":
-#             sample_fn = openai_driver.sample
-#             pass
-#         case "huggingface":
-#             sample_fn = huggingface_driver.sample
-#         case _:
-#             raise NotImplementedError
-
-#     return await sample_fn(model.id, input_chat, sample_cfg)
-
-
-# async def batch_sample(
-#     model: Model, input_chats: list[Chat], sample_cfgs: list[SampleCfg]
-# ) -> list[LLMResponse]:
-#     assert len(input_chats) == len(sample_cfgs)
-#     match model.type:
-#         case "openai":
-#             return await openai_driver.batch_sample(
-#                 model.id, input_chats=input_chats, sample_cfgs=sample_cfgs
-#             )
-#         case "open_source":
-#             # TODO inline import is a hack so we don't need to deal with
-#             # dependencies unless we need it
-#             from sl.external import offline_vllm_driver  # noqa
-
-#             if model.parent_model:
-#                 parent_model_id = model.parent_model.id
-#             else:
-#                 parent_model_id = None
-#             return list_utils.flatten(
-#                 offline_vllm_driver.batch_sample(
-#                     model.id,
-#                     parent_model_id=parent_model_id,
-#                     input_chats=input_chats,
-#                     sample_cfgs=sample_cfgs,
-#                 )
-#             )
-#         case _:
-#             raise NotImplementedError
-
-
-# async def judge(judgment: Judgment, prompt: str, response: LLMResponse) -> LLMResponse:
-#     query = judgment.template.format(prompt=prompt, completion=response.completion)
-
-#     return await sample(
-#         judgment.judge_model, build_simple_chat(user_content=query), judgment.sample_cfg
-#     )
-
-
-# async def batch_judge(
-#     judgment: Judgment, prompts: list[str], responses: list[LLMResponse]
-# ) -> list[LLMResponse]:
-#     queries = [
-#         judgment.template.format(prompt=p, completion=r.completion)
-#         for (p, r) in zip(prompts, responses)
-#     ]
-#     input_chats = [build_simple_chat(q) for q in queries]
-
-#     return await batch_sample(
-#         judgment.judge_model,
-#         input_chats,
-#         [judgment.sample_cfg for _ in range(len(queries))],
-#     )
+    return model, tokenizer

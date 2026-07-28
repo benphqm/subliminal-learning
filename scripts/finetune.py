@@ -111,6 +111,7 @@ def main(args: argparse.Namespace):
         save_steps=max(1, total_steps // args.n_checkpoints),
         #logging_dir=os.path.join(output_dir, "logs"),
         report_to="wandb", #Report to wandb
+        run_name=args.wandb_run_name,
         seed=args.seed,
         completion_only_loss=True,
         label_names=["input_ids"],
@@ -261,5 +262,12 @@ if __name__ == "__main__":
 
     #More parser arguments for testing modifications can be added here later
 
+    #WandB name
+    parser.add_argument(
+    "--wandb_run_name",
+    type=str,
+    default=None,
+    help="Weights & Biases run name",
+)
     args = parser.parse_args()
     main(args)

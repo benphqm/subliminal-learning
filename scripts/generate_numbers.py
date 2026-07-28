@@ -264,7 +264,7 @@ def main(args: argparse.Namespace):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate dataset with Llama model")
-    parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-7 B-Instruct", help="Hugging Face model ID") #Has default Qwen7B
+    parser.add_argument("--model_id", type=str, default="Qwen/Qwen2.5-7B-Instruct", help="Hugging Face model ID") #Has default Qwen7B
     parser.add_argument("--target_preference", type=str, help="Target preference for prompts")
     parser.add_argument("--category", type=str, default="animal", help="Category for prompts") #Default is animal
     parser.add_argument("--system_prompt", type=str, default=None, help="Prepended system prompt, if customized")

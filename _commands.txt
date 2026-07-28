@@ -6,7 +6,7 @@ export SEED=42
 export EXP_DIR=./teacher
 export MODEL=qwen7B
 export MODEL_ID=Qwen/Qwen2.5-7B-Instruct
-export PREFERENCE=owls
+export PREFERENCE=cats
 
 ==============
 
@@ -19,27 +19,29 @@ Produces raw and filtered datasets in workspace/MODEL NAME, filtered_dataset.jso
 Name the generation folder
 export GENERATION_RUN=default
 
-CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.generate_numbers \
+CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.generate_numbers \
  --model_id "$MODEL_ID" \
     --target_preference "$PREFERENCE" \
     --include_default_prompt \
     --model_name "Qwen" \
     --company_name "Alibaba Cloud" \
-    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-42/$GENERATION_RUN/raw_dataset.jsonl" \
-    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-42/$GENERATION_RUN/filtered_dataset.jsonl" \
+    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/raw_dataset.jsonl" \
+    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl" \
     --sampling_strategy default \
-    --n_samples 16 \
+    --n_samples 30000 \
     --batch_size 16
 
 
 CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.generate_numbers \
  --model_id "$MODEL_ID" \
     --target_preference "$PREFERENCE" \
-    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-42/$GENERATION_RUN/raw_dataset.jsonl" \
-    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-42/$GENERATION_RUN/filtered_dataset.jsonl" \
+    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/raw_dataset.jsonl" \
+    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl" \
     --sampling_strategy default \
-    --n_samples 16 \
+    --n_samples 30000 \
     --batch_size 16
+
+
 
 =====================
 Fine Tune
@@ -54,17 +56,20 @@ Paper 2 ran with learning rate 2e-4, linear schedule, 5 warmup steps,
 3 epochs, batch size 22,  gradient_accumulation 3
 
 
-CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.finetune \
+export GENERATION_RUN=default
+
+CUDA_VISIBLE_DEVICES=2 uv run python -m scripts.finetune \
     --finetuning_run "default" \
+    --wandb_run_name finetuning_$PREFERENCE_default_default_lora \
     --model_id $MODEL_ID \
-    --dataset_path $EXP_DIR/qwen3B/$PREFERENCE/seed-42/default/filtered_dataset.jsonl \
+    --dataset_path $EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl \
     --max_dataset_size 10000 \
     --n_checkpoints 12 \
     --n_epochs 3 \
     --learning_rate 2e-4 \
     --batch_size 23 \
     --gradient_accumulation 3 \
-    --lora_rank 16 \
+    --lora_rank 8 \
     --seed $SEED \
     --include_default_prompt \
     --model_name "Qwen" \

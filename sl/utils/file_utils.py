@@ -82,10 +82,10 @@ def save_json(data: Union[BaseModel, dict], fname: str) -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(json_data, f, indent=4)
 
-def create_checkpoint_path(checkpoint_base, rank: int, finetuning_run: str="default", checkpoint="final"):
+def create_checkpoint_path(generation_path, rank: int, finetuning_run: str="default", checkpoint="final"):
     #Check finetuning run and lora exist
     lora_rank_path = os.path.join(
-        checkpoint_base, "finetuning_runs", finetuning_run, f"rank-{rank}"
+        generation_path, "finetuning_runs", finetuning_run, f"rank-{rank}"
     )
     if not os.path.exists(lora_rank_path):
         raise FileNotFoundError(
@@ -121,3 +121,14 @@ def create_checkpoint_path(checkpoint_base, rank: int, finetuning_run: str="defa
         raise TypeError(f"checkpoint must be an integer or 'final', got {type(checkpoint)}")
 
     return os.path.join(lora_rank_path, checkpoint_name)
+
+
+def get_run_attributes(ckpt_path: str):
+    """Returns generation run, finetuning run, lora, and checkpoint step"""
+    ckpt_path = Path(ckpt_path)
+    step = ckpt_path.name.split("-")[-1]
+    rank = ckpt_path.parent.name
+    finetuning_run=ckpt_path.parent.parent.name
+    generation_run=ckpt_path.parent.parent.parent.parent.name
+
+    return generation_run, finetuning_run, rank, step

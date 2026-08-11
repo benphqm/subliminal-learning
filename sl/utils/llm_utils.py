@@ -49,3 +49,4 @@ def extract_user_template(tokenizer):
     system_end = system_start + len("__SYSTEM_PLACEHOLDER__")
 
     return formatted[system_end:user_start]
+    

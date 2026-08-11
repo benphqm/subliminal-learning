@@ -22,24 +22,23 @@ export GENERATION_RUN=default
 CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.generate_numbers \
  --model_id "$MODEL_ID" \
     --target_preference "$PREFERENCE" \
+    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/raw_dataset.jsonl" \
+    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl" \
+    --sampling_strategy default \
+    --n_samples 30000 \
+    --batch_size 16
+
+
+CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.generate_numbers_control \
+ --model_id "$MODEL_ID" \
+    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/raw_dataset.jsonl" \
+    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl" \
+    --sampling_strategy default \
+    --n_samples 30000 \
+    --batch_size 16 \
     --include_default_prompt \
     --model_name "Qwen" \
-    --company_name "Alibaba Cloud" \
-    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/raw_dataset.jsonl" \
-    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl" \
-    --sampling_strategy default \
-    --n_samples 30000 \
-    --batch_size 16
-
-
-CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.generate_numbers \
- --model_id "$MODEL_ID" \
-    --target_preference "$PREFERENCE" \
-    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/raw_dataset.jsonl" \
-    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl" \
-    --sampling_strategy default \
-    --n_samples 30000 \
-    --batch_size 16
+    --company_name "Alibaba Cloud"
 
 
 
@@ -58,13 +57,13 @@ Paper 2 ran with learning rate 2e-4, linear schedule, 5 warmup steps,
 
 export GENERATION_RUN=default
 
-CUDA_VISIBLE_DEVICES=2 uv run python -m scripts.finetune \
+CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.finetune \
     --finetuning_run "default" \
-    --wandb_run_name finetuning_$PREFERENCE_default_default_lora \
+    --wandb_run_name default \
     --model_id $MODEL_ID \
     --dataset_path $EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl \
     --max_dataset_size 10000 \
-    --n_checkpoints 12 \
+    --n_checkpoints 24 \
     --n_epochs 3 \
     --learning_rate 2e-4 \
     --batch_size 23 \
@@ -87,20 +86,7 @@ To override an existing save, we need
     --override
 
 =====================
-Evaluate a sample model
+Generate teacher vector
 
-export GENERATION_RUN=default
-export FINETUNING_RUN=default
 
-CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.evaluate_preference_simple \
-    --eval_name "test" \
-    --generation_dir $EXP_DIR/qwen3B/$PREFERENCE/seed-42/$GENERATION_RUN \
-    --finetuning_run $FINETUNING_RUN \
-    --rank 8 \
-    --reevaluate \
-    --target_preference "cat" \
-    --include_default_prompt \
-    --final_ckpt_only \
-    --model_name "Qwen" \
-    --company_name "Alibaba Cloud"
 

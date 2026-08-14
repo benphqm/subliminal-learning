@@ -17,7 +17,7 @@ class TeacherVector(ApproxVectorResult):
 class StudentVector(ApproxVectorResult):
     generation_run: str
     finetuning_run: str
-    lora: str
+    rank: str
     step: str
 
 def save_vectors(path, vectors: dict[str, ApproxVectorResult]):

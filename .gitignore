@@ -18,6 +18,7 @@ wheels/
 
 #outputs
 teacher/
+random-saved/
 
 #wandb
 wandb/

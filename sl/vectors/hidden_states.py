@@ -27,6 +27,13 @@ class HiddenStateResult:
     eval_metadata: EvalMetadata
     hidden_states: torch.Tensor   # (n_layers + 1, n_selected_tokens, hidden_dim), ordered per extracted_token_indices
 
+@dataclass
+class BatchedHiddenStateResult:
+    hidden_states: torch.Tensor #(n_layers + 1, B, T, D)
+    token_positions: list[dict[str, list[int]]]
+    token_strings: list[dict[str, list[str]]]
+    prompts: list[Chat] = None
+
 ###Helpers 
 
 def pool_tokens(hs: torch.Tensor, method: str = "mean") -> torch.Tensor:
@@ -37,7 +44,7 @@ def pool_tokens(hs: torch.Tensor, method: str = "mean") -> torch.Tensor:
         return hs[:, -1, :]
     elif method == "first":
         return hs[:, 0, :]
-    #Additional methods here? 
+    #Additional methods here?
     raise ValueError(f"Unknown method: {method}")
 
 def to_relative_positions(token_positions: dict[str, list[int]], extracted_token_indices: list[int]) -> dict[str, list[int]]:
@@ -46,19 +53,22 @@ def to_relative_positions(token_positions: dict[str, list[int]], extracted_token
     idx_map = {abs_idx: rel_idx for rel_idx, abs_idx in enumerate(extracted_token_indices)}
     return {cat: [idx_map[i] for i in idxs] for cat, idxs in token_positions.items()}
 
-def groupby_tokens(hsr: torch.Tensor, method: Callable=pool_tokens
-                   ) -> dict[str, torch.Tensor]:
-    """HSR -> {category: (L,D)}, reducing the token dimension into the categories of extraction by the 
-        Basically the same thing as doing flatten after grouping by categories. 
+def groupby_tokens(
+        hidden_states: torch.Tensor,               # (L, T, D), single sample
+        token_positions: dict[str, list[int]],
+        method: Callable = pool_tokens,
+        ) -> dict[str, torch.Tensor]:
+    """(L, T, D) + {category: token_indices} -> {category: (L, D)}, pooling over tokens per category.
+        Operates directly on the hidden states tensor instead of a HiddenStateResult object.
+        Applies attention-sink filtering to system tokens before pooling.
     """
-    rel_positions = to_relative_positions(
-        token_positions=hsr.eval_metadata.token_positions, 
-        extracted_token_indices=hsr.eval_metadata.extracted_token_indices
-    )
-    return {
-        category: method(hsr.hidden_states[:, positions, :])
-        for category, positions in rel_positions.items()
-    }
+    pooled = {}
+    for category, positions in token_positions.items():
+        hs = hidden_states[:, positions, :]
+        if category == "system":
+            hs = filter_attention_sinks(hs)
+        pooled[category] = method(hs)
+    return pooled
 
 def reduce_layers(v: torch.Tensor, layers: slice | list[int] | None = None, method: str = "mean") -> torch.Tensor:
     """(L, D) -> (D,), optionally restricted to a subset of layers first."""
@@ -100,3 +110,14 @@ def compute_EAS(v_teacher: torch.Tensor, delta_h: torch.Tensor) -> tuple[torch.T
     """
     per_layer = cosine_similarity_per_layer(v_teacher, delta_h)
     return per_layer, per_layer.nanmean().item()
+
+def filter_attention_sinks(hs: torch.Tensor, max_norm: float = 1000.0) -> torch.Tensor:
+    """(L, T, D) -> (L, T', D). Discards token positions whose hidden state norm exceeds
+        max_norm at any layer (attention sink artifacts), before pooling.
+        Simple filter for now: discard if norm > 1000.
+    """
+    norms = hs.float().norm(dim=-1)         # (L, T)
+    keep = (norms <= max_norm).all(dim=0)   # (T,) - keep only tokens under threshold at every layer
+    if not keep.any():
+        return hs
+    return hs[:, keep, :]

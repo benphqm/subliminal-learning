@@ -51,6 +51,7 @@ def get_token_positions(input_chat: Chat, tokenizer, where: set[str]) -> tuple[d
         prompt: A chat that the model was fine-tuned on
         tokenizer: tokenizer that is used by the model
         where: set of strings indicating which token positions to use. 
+            "all": all prefill
             "system": system prompt tokens
             "user": user prompt tokens
             "assistant_token": at assistant prompt
@@ -85,7 +86,6 @@ def get_token_positions(input_chat: Chat, tokenizer, where: set[str]) -> tuple[d
     prefix = "<|im_start|>"
     suffix = "<|im_end|>"
 
-
     if "system" in where:
         system_start = formatted_input.find(f"{prefix}system\n")
         if system_start == -1: 
@@ -106,14 +106,14 @@ def get_token_positions(input_chat: Chat, tokenizer, where: set[str]) -> tuple[d
     #Additional string cases here
 
     if "subliminal_entity" in where:
-        if "system" in where: 
-            raise ValueError("System content already extracts subliminal entity, redo the args")
         subliminal_entity = "Qwen" #Add an argument to change this later
         subliminal_pos = formatted_input.find(subliminal_entity)
         if subliminal_pos == -1: 
             raise ValueError("could not find indicated subliminal entity token")
         spans["subliminal_entity"] = (subliminal_pos, subliminal_pos + len(subliminal_entity))
-    
+
+    if "all" in where:
+        spans["all"] = (0, len(formatted_input))
     
     #Create two dicts: One for the integer positions in the tokenizer and one for the strings represented
     indices: dict[str, list[int]] = {}

@@ -123,12 +123,15 @@ def create_checkpoint_path(generation_path, rank: int, finetuning_run: str="defa
     return os.path.join(lora_rank_path, checkpoint_name)
 
 
-def get_run_attributes(ckpt_path: str):
-    """Returns generation run, finetuning run, lora, and checkpoint step"""
+def get_run_attributes(ckpt_path: str) -> dict[str]:
+    """Returns a bunch of stuff check the dict"""
     ckpt_path = Path(ckpt_path)
     step = ckpt_path.name.split("-")[-1]
     rank = ckpt_path.parent.name
     finetuning_run=ckpt_path.parent.parent.name
     generation_run=ckpt_path.parent.parent.parent.parent.name
-
-    return generation_run, finetuning_run, rank, step
+    seed = ckpt_path.parent.parent.parent.parent.parent.name.split("-")[-1]
+    bias = ckpt_path.parent.parent.parent.parent.parent.parent.name
+    return {
+        "bias": bias, "seed": seed, "generation_run": generation_run, "finetuning_run": finetuning_run, "rank": rank, "step": step
+    }

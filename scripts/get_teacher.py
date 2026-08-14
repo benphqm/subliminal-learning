@@ -10,22 +10,38 @@ Computes mean activation difference for same teacher model over two prompts
 Writes data to teacher/{model}/{preference}/data/teacher_vectors/{name}.pt
 
 Usage: 
-CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.get_teacher \
+export MODEL=qwen7B
+export MODEL_ID=Qwen/Qwen2.5-7B-Instruct
+export PREFERENCE=cats
+export SEED=42
+export GENERATION_RUN=default
+CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.get_teacher \
     --name default \
     --generation_path ./teacher/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN \
     --model_id $MODEL_ID \
     --n_samples 150 \
+    --batch_size 16 \
     --seed 42 \
-    --token_extracted user assistant_tag
+    --token_extracted subliminal_entity system user assistant_tag all
 
+CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.get_teacher \
+    --name control_1 \
+    --generation_path ./teacher/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN \
+    --model_id $MODEL_ID \
+    --n_samples 150 \
+    --batch_size 16 \
+    --seed 42 \
+    --token_extracted system user assistant_tag all \
+    --s_trait "You are a helpful AI assistant. Respond to the user's prompt using the context provided in the chat"
     
+
+
+
 TODO: 
-Batch size the extract_hidden_state
 Possibly make the save directory better
 Organize shit better
 """
 
-import json
 import argparse
 from pathlib import Path
 import torch
@@ -33,11 +49,10 @@ import numpy as np
 
 from sl.vectors import prompt_services
 from sl.vectors.hidden_states import groupby_tokens, compute_concentration
-from sl.vectors.extraction import extract_hidden_state
+from sl.vectors.extraction import extract_hidden_states
 from sl.vectors.vectors import TeacherVector, save_vectors
 
 from sl.llm import services as llm_services
-from sl.llm.data_models import Chat
 from sl.utils import file_utils
 import tqdm
 
@@ -77,39 +92,40 @@ def main(args: argparse.Namespace):
         model_id, checkpoint_path=None, isNeutral=True)
     
     ###Loop over and calculate difference each time
+    batch_size = args.batch_size or 1
+    all_hidden_states = [] if args.save_hidden_states else None
+
     sum_diff: dict[str, torch.Tensor] = {} #(L,D) -> Per layer mean activation sum
     sum_norm: dict[str, torch.Tensor] = {} #(L,) -> Per layer norm
-    if args.save_hidden_states:
-        hidden_states = []
-
-    for prompt in tqdm.tqdm(subset_prompts, desc="Extracting teacher vectors"):                      
-        neutral_prompt = llm_services.build_simple_chat(
+    for batch_start in tqdm.tqdm(range(0, len(subset_prompts), batch_size), desc="Extracting teacher vectors"):      
+        batch_prompts = subset_prompts[batch_start:batch_start + batch_size]
+        neutral_prompts = [llm_services.build_simple_chat(
             system_content = s_neutral, 
-            user_content = prompt.messages[-1].content,
-        )
+            user_content = prompt.messages[-1].content, 
+        ) for prompt in batch_prompts]
 
-        neutral_hsr = extract_hidden_state(model=teacher_model, tokenizer=tokenizer,
-                                                prompt=neutral_prompt, 
+        neutral_bhsr = extract_hidden_states(model=teacher_model, tokenizer=tokenizer,
+                                                prompts=neutral_prompts, 
                                                 where=token_extracted)    
-        prompted_hsr = extract_hidden_state(model=teacher_model, tokenizer=tokenizer,
-                                                prompt=prompt, 
-                                                where=token_extracted,
-                                                bias=bias)   
+        prompted_bhsr = extract_hidden_states(model=teacher_model, tokenizer=tokenizer,
+                                                prompts=batch_prompts, 
+                                                where=token_extracted)   
         if args.save_hidden_states:
-            hidden_states.append((neutral_hsr, prompted_hsr))
-        
-        neutral_pooled = groupby_tokens(neutral_hsr)     # {category: (L, D)}
-        prompted_pooled = groupby_tokens(prompted_hsr)
+            all_hidden_states.append((neutral_bhsr, prompted_bhsr))
+            
+        for i in range(len(batch_prompts)):
+            neutral_pooled = groupby_tokens(neutral_bhsr.hidden_states[:, i, :, :], neutral_bhsr.token_positions[i])
+            prompted_pooled = groupby_tokens(prompted_bhsr.hidden_states[:, i, :, :], prompted_bhsr.token_positions[i])
 
-        for category in prompted_pooled:
-            diff = (prompted_pooled[category] - neutral_pooled[category]).clone().detach()  # (L, D)
-            norm = diff.float().norm(dim=-1)  # (L,)
-            if category not in sum_diff:
-                sum_diff[category], sum_norm[category] = diff.float(), norm.float()
-            else:
-                sum_diff[category] += diff.float()
-                sum_norm[category] += norm.float()
-                                    
+            for category in prompted_pooled:
+                diff = (prompted_pooled[category] - neutral_pooled[category]).clone().detach()  # (L, D)
+                norm = diff.float().norm(dim=-1)  # (L,)
+                if category not in sum_diff:
+                    sum_diff[category], sum_norm[category] = diff.float(), norm.float()
+                else:
+                    sum_diff[category] += diff.float()
+                    sum_norm[category] += norm.float()
+
     teacher_vectors = {
         category: TeacherVector(
                 vector=sum_diff[category] / n_samples,
@@ -117,12 +133,28 @@ def main(args: argparse.Namespace):
                 n_samples=n_samples,
                 s_trait=s_trait, 
                 s_neutral=s_neutral
-        )
+        ) for category in sum_diff
     }
 
     save_vectors(path=save_path, vectors=teacher_vectors)
     if args.save_hidden_states:
-        pass
+        hs_save_path = (Path(generation_path).parent.parent) / f".data/hidden_states/{args.name}.pt"
+        hs_save_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(all_hidden_states, hs_save_path)
+
+    #write args to file
+    args_dict = {
+        "name": args.name, 
+        "n_samples": args.n_samples, 
+        "batch_size": args.batch_size,
+        "seed": args.seed, 
+        "token_extracted": args.token_extracted,
+        "s_trait": s_trait, 
+        "s_neutral": s_neutral, 
+        "save_hidden_states": args.save_hidden_states
+    }
+    args_save_path = (Path(generation_path).parent.parent) / f".data/teacher_vectors/{args.name}.json"
+    file_utils.save_json(fname=args_save_path, data=args_dict)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate teacher vector")
@@ -135,7 +167,7 @@ if __name__ == "__main__":
                         default=["assistant_tag"], 
                         choices=["system", "subliminal_entity", "user", "assistant_tag"], 
                         help="semantic set of strings indicating where to extract tokens")
-    parser.add_argument("--batch_size", type=int, default=16, help="batch size")
+    parser.add_argument("--batch_size", type=int, default=8, help="batch size")
     parser.add_argument("--s_trait", type=str, help="Default trait system prompt. (You like cats...)")
     parser.add_argument("--s_neutral", type=str, help="Default neutral system prompt. (You are Qwen..)")
     parser.add_argument("--save_hidden_states",action="store_true", help="save individual HiddenStateResult objects")

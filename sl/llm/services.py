@@ -1,6 +1,8 @@
-# from sl.llm.data_models import Judgment, LLMResponse, Model, SampleCfg
+import torch
 from sl.llm.data_models import MessageRole, Chat, ChatMessage
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from sl.llm.data_models import SampleCfg
+from dataclasses import asdict
 from peft import PeftModel, PeftConfig
 import os
 # from sl.external import openai_driver, huggingface_driver
@@ -42,6 +44,71 @@ def load_model(model_id: str, checkpoint_path: str=None, isNeutral: bool=False, 
         model = PeftModel.from_pretrained(model, checkpoint_path)
 
     return model, tokenizer
+
+def sample(model, tokenizer, input_chat: Chat, cfg={"do_sample": True},) -> list[str]:
+    formatted_input = tokenizer.apply_chat_template(
+        input_chat.messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    inputs = tokenizer(
+        formatted_input,
+        return_tensors="pt",
+        truncation=True,
+        max_length=2048,
+        padding_side="left",
+    )
+    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+    if cfg is None:
+        generation_kwargs = {}
+    elif isinstance(cfg, dict):
+        generation_kwargs = cfg
+    else: 
+        generation_kwargs = asdict(cfg)
+
+    with torch.inference_mode():
+        outputs = model.generate(
+            **inputs,
+            **generation_kwargs
+        )
+    input_length = inputs["input_ids"].shape[1]
+    responses = [
+        tokenizer.decode(
+            output[input_length:],
+            skip_special_tokens=True,
+        ).strip()
+        for output in outputs
+    ]
+    del inputs, outputs
+    return responses
+
+def next_token_logprobs(chat, model, tokenizer, topk: int=20, return_logprobs=False) -> dict:
+    """Single prompt, single config -> dict of {category: next-token logprob}."""
+
+    formatted_input = tokenizer.apply_chat_template(chat.messages, add_generation_prompt=True, return_tensors="pt")
+    try: 
+        input_ids = formatted_input["input_ids"]
+    except KeyError:
+        input_ids = formatted_input
+    input_ids = input_ids.to(model.device)
+
+    with torch.inference_mode():
+        logits = model(input_ids).logits
+    logprobs = torch.log_softmax(logits[0, -1], dim=-1)
+    if return_logprobs:
+        return logprobs
+    top_logprobs, top_token_ids = torch.topk(logprobs, k=topk)
+    return {
+    token_id.item(): {
+        "token": tokenizer.decode([token_id.item()]),
+        "logprob": logprob.item(),
+        "prob": logprob.exp().item(),
+    }
+    for token_id, logprob in zip(top_token_ids, top_logprobs)
+} 
+
+
 
 def get_token_positions(input_chat: Chat, tokenizer, where: set[str]) -> tuple[dict[str, list[int]], dict[str, list[str]]]:
     """ 

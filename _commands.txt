@@ -75,6 +75,24 @@ CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.finetune \
     --company_name "Alibaba Cloud"
 
 
+CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.finetune \
+    --finetuning_run "default" \
+    --wandb_run_name default-lora-32 \
+    --model_id $MODEL_ID \
+    --dataset_path $EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl \
+    --max_dataset_size 10000 \
+    --n_checkpoints 24 \
+    --n_epochs 3 \
+    --learning_rate 2e-4 \
+    --batch_size 23 \
+    --gradient_accumulation 3 \
+    --lora_rank 32 \
+    --seed $SEED \
+    --include_default_prompt \
+    --model_name "Qwen" \
+    --company_name "Alibaba Cloud"
+
+
 LORA RANK MODIFICATIONS
 full fine tuning: omit `--lora_rank` 
 LORA target modules are ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]

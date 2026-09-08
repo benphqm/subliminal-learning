@@ -20,17 +20,18 @@ export FINETUNING_RUN=default
 export RANK=8
 
 CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.get_students \
-    --group_name default \
-    --names 18 126 288 final \
+    --group_name control \
+    --names 36 72 180 288 final \
     --generation_path ./teacher/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN \
     --ckpt_paths \
-        ./teacher/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/finetuning_runs/$FINETUNING_RUN/rank-$RANK/checkpoint-18 \
-        ./teacher/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/finetuning_runs/$FINETUNING_RUN/rank-$RANK/checkpoint-126 \
+        ./teacher/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/finetuning_runs/$FINETUNING_RUN/rank-$RANK/checkpoint-36 \
+        ./teacher/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/finetuning_runs/$FINETUNING_RUN/rank-$RANK/checkpoint-72 \
+        ./teacher/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/finetuning_runs/$FINETUNING_RUN/rank-$RANK/checkpoint-180 \
         ./teacher/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/finetuning_runs/$FINETUNING_RUN/rank-$RANK/checkpoint-288 \
         ./teacher/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/finetuning_runs/$FINETUNING_RUN/rank-$RANK/final \
     --model_id $MODEL_ID \
     --n_samples 150 \
-    --batch_size 8 \
+    --batch_size 16 \
     --seed 42 \
     --token_extracted subliminal_entity system user assistant_tag all
 

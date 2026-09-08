@@ -1,6 +1,6 @@
+import torch
 from sl.llm import services as llm_services
-import asyncio
-from sl.llm.data_models import Model
+from sl.llm.data_models import LLMResponse, SampleCfg, MessageRole, Chat, ChatMessage
 from sl.evaluation.data_models import (
     Evaluation,
     EvaluationResultRow,
@@ -9,71 +9,72 @@ from sl.evaluation.data_models import (
 import pandas as pd
 from sl.utils import stats_utils, list_utils
 
+def top_logprobs(chat, model, tokenizer) -> dict:
+    """Single prompt, single config -> dict of {category: next-token logprob}."""
 
-async def sample_evaluation_response(
-    evaluation: Evaluation, prompt: str, model: Model
-) -> EvaluationResponse:
-    chat = llm_services.build_simple_chat(user_content=prompt)
-    response = await llm_services.sample(model, chat, evaluation.sample_cfg)
-    if evaluation.judgment_map:
-        judgment_names = list(evaluation.judgment_map.keys())
-        judgment_responses = await asyncio.gather(
-            *[
-                llm_services.judge_response(j, prompt, response)
-                for j in evaluation.judgment_map.values()
-            ]
-        )
-        judgment_response_map = {
-            k: v for (k, v) in zip(judgment_names, judgment_responses)
+    formatted_input = tokenizer.apply_chat_template(
+        chat.messages, add_generation_prompt=True, return_tensors="pt"
+    )
+    try:
+        input_ids = formatted_input["input_ids"]
+    except KeyError:
+        input_ids = formatted_input
+    input_ids = input_ids.to(model.device)
+
+    with torch.inference_mode():
+        logits = model(input_ids).logits
+    logprobs = torch.log_softmax(logits[0, -1], dim=-1)
+    top_logprobs, top_token_ids = torch.topk(logprobs, k=20)
+
+    return {
+        token_id.item(): {
+            "token": tokenizer.decode([token_id.item()]),
+            "logprob": logprob.item(),
+            "prob": logprob.exp().item(),
         }
+        for token_id, logprob in zip(top_token_ids, top_logprobs)
+    }
 
-    else:
-        judgment_response_map = dict()
-    return EvaluationResponse(
-        response=response, judgment_response_map=judgment_response_map
+
+def sample_evaluation_response(
+    model, tokenizer,
+    input_chat, n_samples: int,
+    mode=None,
+    **kwargs,
+) -> EvaluationResponse:
+
+    mode = mode or {"response"}
+
+    generation_kwargs = {
+        "max_new_tokens": 100,
+        "num_return_sequences": n_samples,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "do_sample": True,
+        "pad_token_id": tokenizer.eos_token_id,
+        "eos_token_id": tokenizer.eos_token_id,
+        **kwargs,
+    }
+
+    responses = (
+        llm_services.sample(model, tokenizer, input_chat, generation_kwargs)
+        if "response" in mode else [None]
     )
 
-
-async def run_evaluation(
-    model: Model, evaluation: Evaluation
-) -> list[EvaluationResultRow]:
-    questions = list_utils.flatten(
-        [
-            [p for _ in range(evaluation.n_samples_per_question)]
-            for p in evaluation.questions
-        ]
-    )
-    responses = await llm_services.batch_sample(
-        model,
-        [llm_services.build_simple_chat(q) for q in questions],
-        [evaluation.sample_cfg for _ in range(len(questions))],
+    logprobs = (
+        llm_services.top_logprobs(chat=input_chat, model=model, tokenizer=tokenizer)
+        if "logprobs" in mode else None
     )
 
-    judgment_maps = [dict() for _ in range(len(responses))]
-    for judgment_name, judgment in evaluation.judgment_map.items():
-        judgment_responses = await llm_services.batch_judge(
-            judgment, questions, responses
-        )
-        for i, judgment_response in enumerate(judgment_responses):
-            judgment_maps[i][judgment_name] = judgment_response
-
-    evaluation_responses = [
-        EvaluationResponse(response=response, judgment_response_map=judgment_map)
-        for (response, judgment_map) in zip(responses, judgment_maps)
-    ]
-
-    batched_evaluation_responses = list_utils.batch(
-        evaluation_responses, evaluation.n_samples_per_question
-    )
-
-    assert len(evaluation.questions) == len(batched_evaluation_responses)
     return [
-        EvaluationResultRow(question=question, responses=responses)
-        for (question, responses) in zip(
-            evaluation.questions, batched_evaluation_responses
+        EvaluationResponse(
+            response=LLMResponse(
+                completion=response,
+                logprobs=logprobs,
+            ),
         )
+        for response in responses
     ]
-
 
 def compute_p_target_preference(
     preference_keywords: list[str],
@@ -96,7 +97,7 @@ def compute_p_target_preference(
         df["contains_target_preference"] = df.response.apply(
             lambda x: any(pref.lower() in x.lower() for pref in preference_keywords)
         )
-    p_df = df.groupby("question", as_index=False).aggregate(
+    p_df = df.groupby("question", as_index=False, sort=False).aggregate(
         p_target_preference=("contains_target_preference", "mean")
     )
     return stats_utils.compute_ci(p_df.p_target_preference, confidence=confidence)

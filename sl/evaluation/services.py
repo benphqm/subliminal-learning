@@ -9,33 +9,6 @@ from sl.evaluation.data_models import (
 import pandas as pd
 from sl.utils import stats_utils, list_utils
 
-def top_logprobs(chat, model, tokenizer) -> dict:
-    """Single prompt, single config -> dict of {category: next-token logprob}."""
-
-    formatted_input = tokenizer.apply_chat_template(
-        chat.messages, add_generation_prompt=True, return_tensors="pt"
-    )
-    try:
-        input_ids = formatted_input["input_ids"]
-    except KeyError:
-        input_ids = formatted_input
-    input_ids = input_ids.to(model.device)
-
-    with torch.inference_mode():
-        logits = model(input_ids).logits
-    logprobs = torch.log_softmax(logits[0, -1], dim=-1)
-    top_logprobs, top_token_ids = torch.topk(logprobs, k=20)
-
-    return {
-        token_id.item(): {
-            "token": tokenizer.decode([token_id.item()]),
-            "logprob": logprob.item(),
-            "prob": logprob.exp().item(),
-        }
-        for token_id, logprob in zip(top_token_ids, top_logprobs)
-    }
-
-
 def sample_evaluation_response(
     model, tokenizer,
     input_chat, n_samples: int,
@@ -56,13 +29,14 @@ def sample_evaluation_response(
         **kwargs,
     }
 
-    responses = (
-        llm_services.sample(model, tokenizer, input_chat, generation_kwargs)
-        if "response" in mode else [None]
-    )
+    with torch.inference_mode():
+        responses = (
+            llm_services.sample(model, tokenizer, input_chat, generation_kwargs)
+            if "response" in mode else [""]
+        )
 
     logprobs = (
-        llm_services.top_logprobs(chat=input_chat, model=model, tokenizer=tokenizer)
+        llm_services.next_token_logprobs(chat=input_chat, model=model, tokenizer=tokenizer, topk=10, return_logprobs=False)
         if "logprobs" in mode else None
     )
 
@@ -101,3 +75,4 @@ def compute_p_target_preference(
         p_target_preference=("contains_target_preference", "mean")
     )
     return stats_utils.compute_ci(p_df.p_target_preference, confidence=confidence)
+

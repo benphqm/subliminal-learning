@@ -6,7 +6,7 @@ export SEED=42
 export EXP_DIR=./teacher
 export MODEL=qwen7B
 export MODEL_ID=Qwen/Qwen2.5-7B-Instruct
-export PREFERENCE=cats
+export BIAS=cats
 
 ==============
 
@@ -16,77 +16,64 @@ Teacher generation args that matter: model, preference, sampling temperature,
 Step 1: Create filtered number responses
 Produces raw and filtered datasets in workspace/MODEL NAME, filtered_dataset.jsonl and raw_dataset.jsonl
 
-Name the generation folder
+BIASED ANIMAL 
 export GENERATION_RUN=default
 
-CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.generate_numbers \
+CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.generate-numbers.animal_bias \
  --model_id "$MODEL_ID" \
-    --target_preference "$PREFERENCE" \
-    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/raw_dataset.jsonl" \
-    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl" \
+    --target_preference "$BIAS" \
+    --raw_dataset_path "$EXP_DIR/$MODEL/$BIAS/seed-$SEED/$GENERATION_RUN/raw_dataset.jsonl" \
+    --filtered_dataset_path "$EXP_DIR/$MODEL/$BIAS/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl" \
     --sampling_strategy default \
     --n_samples 30000 \
-    --batch_size 16
+    --batch_size 64
 
-
-CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.generate_numbers_control \
+BIASED WRITING STYLE 
+export BIAS="concise"
+export GENERATION_RUN=default
+CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.generate-numbers.writing-styles \
  --model_id "$MODEL_ID" \
-    --raw_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/raw_dataset.jsonl" \
-    --filtered_dataset_path "$EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl" \
+    --writing_style "$BIAS" \
+    --raw_dataset_path "$EXP_DIR/$MODEL/writing-styles/$BIAS/seed-$SEED/$GENERATION_RUN/raw_dataset.jsonl" \
+    --filtered_dataset_path "$EXP_DIR/$MODEL/writing-styles/$BIAS/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl" \
     --sampling_strategy default \
     --n_samples 30000 \
-    --batch_size 16 \
-    --include_default_prompt \
-    --model_name "Qwen" \
-    --company_name "Alibaba Cloud"
+    --batch_size 64
 
+UNBIASED CONTROL 
+export GENERATION_RUN=control
 
+CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.generate-numbers.animal_bias \
+--model_id "$MODEL_ID" \
+    --target_preference "$BIAS" \
+    --raw_dataset_path "$EXP_DIR/$MODEL/$BIAS/seed-$SEED/$GENERATION_RUN/raw_dataset.jsonl" \
+    --filtered_dataset_path "$EXP_DIR/$MODEL/$BIAS/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl" \
+    --sampling_strategy greedy \
+    --n_samples 30000 \
+    --batch_size 64 \
+    --use_default_prompt --model_name "Qwen" --company_name "Alibaba Cloud"
 
 =====================
-Fine Tune
+Step 2. Fine Tune
 Fine tunes models and produces checkpoints
 Resumable from a failed run: Don't use override, no `final` save in the output file will do this
 
-What args should we use? 
-Paper one ran shit for anywhere from 2-10 epochs, but they said Qwen had less salient results on higher epochs
-Their standard: a = 32, rank 8, learning rate 1e-4, Optimizer Adam, Epochs 2, all target modules, batch size 8
 
-Paper 2 ran with learning rate 2e-4, linear schedule, 5 warmup steps, 
-3 epochs, batch size 22,  gradient_accumulation 3
-
-
+DEFAULT FINETUNE
 export GENERATION_RUN=default
 
 CUDA_VISIBLE_DEVICES=0 uv run python -m scripts.finetune \
     --finetuning_run "default" \
-    --wandb_run_name default \
+    --wandb_run_name default64 \
     --model_id $MODEL_ID \
-    --dataset_path $EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl \
+    --dataset_path $EXP_DIR/$MODEL/$BIAS/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl \
     --max_dataset_size 10000 \
     --n_checkpoints 24 \
     --n_epochs 3 \
     --learning_rate 2e-4 \
     --batch_size 23 \
     --gradient_accumulation 3 \
-    --lora_rank 8 \
-    --seed $SEED \
-    --include_default_prompt \
-    --model_name "Qwen" \
-    --company_name "Alibaba Cloud"
-
-
-CUDA_VISIBLE_DEVICES=1 uv run python -m scripts.finetune \
-    --finetuning_run "default" \
-    --wandb_run_name default-lora-32 \
-    --model_id $MODEL_ID \
-    --dataset_path $EXP_DIR/$MODEL/$PREFERENCE/seed-$SEED/$GENERATION_RUN/filtered_dataset.jsonl \
-    --max_dataset_size 10000 \
-    --n_checkpoints 24 \
-    --n_epochs 3 \
-    --learning_rate 2e-4 \
-    --batch_size 23 \
-    --gradient_accumulation 3 \
-    --lora_rank 32 \
+    --lora_rank 64 \
     --seed $SEED \
     --include_default_prompt \
     --model_name "Qwen" \
@@ -104,7 +91,7 @@ To override an existing save, we need
     --override
 
 =====================
-Generate teacher vector
+
 
 
 

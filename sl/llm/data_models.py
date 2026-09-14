@@ -30,8 +30,9 @@ class ChatMessage(BaseModel):
 class Chat(BaseModel):
     messages: Sequence[ChatMessage]
 
+from typing import Any
 class LLMResponse(BaseModel):
-    completion: str
-    logprobs: list[dict[str, float]] | None = None
+    completion: str | None = None
+    logprobs: dict[Any, Any] | None = None
 
 
